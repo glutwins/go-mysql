@@ -33,8 +33,8 @@ const (
 	TYPE_JSON                 // json
 	TYPE_DECIMAL              // decimal
 	TYPE_MEDIUM_INT
-	TYPE_BINARY               // binary, varbinary
-	TYPE_POINT                // coordinates
+	TYPE_BINARY // binary, varbinary
+	TYPE_POINT  // coordinates
 )
 
 type TableColumn struct {
@@ -162,7 +162,7 @@ func getSizeFromColumnType(columnType string) uint {
 		return 0
 	}
 
-	i, err := strconv.Atoi(columnType[startIndex+1:endIndex])
+	i, err := strconv.Atoi(columnType[startIndex+1 : endIndex])
 	if err != nil || i < 0 {
 		return 0
 	}
@@ -330,33 +330,29 @@ func (ta *Table) fetchIndexesViaSqlDB(conn *sql.DB) error {
 
 	defer r.Close()
 
+	columnTypes, err := r.ColumnTypes()
+	if err != nil {
+		return errors.Trace(err)
+	}
+
 	var currentIndex *Index
 	currentName := ""
 
 	var unusedVal interface{}
-	unused := &unusedVal
+
+	row := make([]interface{}, len(columnTypes))
+	for i := 0; i < len(columnTypes); i++ {
+		row[i] = &unusedVal
+	}
 
 	for r.Next() {
 		var indexName, colName string
 		var cardinality interface{}
+		row[2] = &indexName
+		row[4] = &colName
+		row[6] = &cardinality
 
-		err := r.Scan(
-			&unused,
-			&unused,
-			&indexName,
-			&unused,
-			&colName,
-			&unused,
-			&cardinality,
-			&unused,
-			&unused,
-			&unused,
-			&unused,
-			&unused,
-			&unused,
-			&unused,
-		)
-		if err != nil {
+		if err := r.Scan(row...); err != nil {
 			return errors.Trace(err)
 		}
 
