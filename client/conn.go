@@ -55,9 +55,9 @@ func Connect(addr string, user string, password string, dbName string, options .
 	}
 
 	if c.tlsConfig != nil {
-		c.Conn = packet.NewTLSConn(conn)
+		c.Conn = packet.NewConn(conn, 0)
 	} else {
-		c.Conn = packet.NewConn(conn)
+		c.Conn = packet.NewConn(conn, 65536)
 	}
 
 	c.user = user

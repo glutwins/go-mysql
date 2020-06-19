@@ -50,29 +50,21 @@ type Conn struct {
 	// able to read the "Client Hello" data since it has been buffered into the buffer reader)
 
 	bufPool *BufPool
-	br      *bufio.Reader
 	reader  io.Reader
 
 	Sequence uint8
 }
 
-func NewConn(conn net.Conn) *Conn {
+func NewConn(conn net.Conn, bufferSize int) *Conn {
 	c := new(Conn)
 	c.Conn = conn
 
 	c.bufPool = NewBufPool()
-	c.br = bufio.NewReaderSize(c, 65536) // 64kb
-	c.reader = c.br
-
-	return c
-}
-
-func NewTLSConn(conn net.Conn) *Conn {
-	c := new(Conn)
-	c.Conn = conn
-
-	c.bufPool = NewBufPool()
-	c.reader = c
+	if bufferSize <= 0 {
+		c.reader = c
+	} else {
+		c.reader = bufio.NewReaderSize(c, bufferSize) // 64kb
+	}
 
 	return c
 }
@@ -84,10 +76,8 @@ func (c *Conn) ReadPacket() ([]byte, error) {
 
 	if err := c.ReadPacketTo(buf); err != nil {
 		return nil, errors.Trace(err)
-	} else {
-		result := append([]byte{}, buf.Bytes()...)
-		return result, nil
 	}
+	return append([]byte{}, buf.Bytes()...), nil
 }
 
 func (c *Conn) ReadPacketTo(w io.Writer) error {
@@ -111,21 +101,19 @@ func (c *Conn) ReadPacketTo(w io.Writer) error {
 		buf.Grow(length)
 	}
 
-	if n, err := io.CopyN(w, c.reader, int64(length)); err != nil {
+	n, err := io.CopyN(w, c.reader, int64(length))
+	if err != nil {
 		return errors.Wrapf(ErrBadConn, "io.CopyN failed. err %v, copied %v, expected %v", err, n, length)
-	} else if n != int64(length) {
+	}
+	if n != int64(length) {
 		return errors.Wrapf(ErrBadConn, "io.CopyN failed(n != int64(length)). %v bytes copied, while %v expected", n, length)
-	} else {
-		if length < MaxPayloadLen {
-			return nil
-		}
-
-		if err := c.ReadPacketTo(w); err != nil {
-			return errors.Wrap(err, "ReadPacketTo failed")
-		}
 	}
 
-	return nil
+	if length < MaxPayloadLen {
+		return nil
+	}
+
+	return c.ReadPacketTo(w)
 }
 
 // WritePacket: data already has 4 bytes header

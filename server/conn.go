@@ -45,9 +45,9 @@ func NewConn(conn net.Conn, user string, password string, h Handler) (*Conn, err
 
 	var packetConn *packet.Conn
 	if defaultServer.tlsConfig != nil {
-		packetConn = packet.NewTLSConn(conn)
+		packetConn = packet.NewConn(conn, 0)
 	} else {
-		packetConn = packet.NewConn(conn)
+		packetConn = packet.NewConn(conn, 65536)
 	}
 
 	c := &Conn{
@@ -73,9 +73,9 @@ func NewConn(conn net.Conn, user string, password string, h Handler) (*Conn, err
 func NewCustomizedConn(conn net.Conn, serverConf *Server, p CredentialProvider, h Handler) (*Conn, error) {
 	var packetConn *packet.Conn
 	if serverConf.tlsConfig != nil {
-		packetConn = packet.NewTLSConn(conn)
+		packetConn = packet.NewConn(conn, 0)
 	} else {
-		packetConn = packet.NewConn(conn)
+		packetConn = packet.NewConn(conn, 65536)
 	}
 
 	salt, _ := RandomBuf(20)
