@@ -3,8 +3,6 @@ package canal
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
-	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -16,7 +14,6 @@ import (
 	"github.com/pingcap/parser"
 	"github.com/siddontang/go-log/log"
 	"github.com/siddontang/go-mysql/client"
-	"github.com/siddontang/go-mysql/dump"
 	"github.com/siddontang/go-mysql/mysql"
 	"github.com/siddontang/go-mysql/replication"
 	"github.com/siddontang/go-mysql/schema"
@@ -29,12 +26,9 @@ type Canal struct {
 
 	cfg *Config
 
-	parser     *parser.Parser
-	master     *masterInfo
-	dumper     *dump.Dumper
-	dumped     bool
-	dumpDoneCh chan struct{}
-	syncer     *replication.BinlogSyncer
+	parser *parser.Parser
+	master *masterInfo
+	syncer *replication.BinlogSyncer
 
 	eventHandler EventHandler
 
@@ -55,8 +49,6 @@ type Canal struct {
 	cancel context.CancelFunc
 }
 
-// canal will retry fetching unknown table's meta after UnknownTableRetryPeriod
-var UnknownTableRetryPeriod = time.Second * time.Duration(10)
 var ErrExcludedTable = errors.New("excluded table meta")
 
 func NewCanal(cfg *Config) (*Canal, error) {
@@ -65,24 +57,14 @@ func NewCanal(cfg *Config) (*Canal, error) {
 
 	c.ctx, c.cancel = context.WithCancel(context.Background())
 
-	c.dumpDoneCh = make(chan struct{})
 	c.eventHandler = &DummyEventHandler{}
 	c.parser = parser.New()
 	c.tables = make(map[string]*schema.Table)
-	if c.cfg.DiscardNoMetaRowEvent {
-		c.errorTablesGetTime = make(map[string]time.Time)
-	}
 	c.master = &masterInfo{}
 
 	c.delay = new(uint32)
 
-	var err error
-
-	if err = c.prepareDumper(); err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	if err = c.prepareSyncer(); err != nil {
+	if err := c.prepareSyncer(); err != nil {
 		return nil, errors.Trace(err)
 	}
 
@@ -120,60 +102,6 @@ func NewCanal(cfg *Config) (*Canal, error) {
 	return c, nil
 }
 
-func (c *Canal) prepareDumper() error {
-	var err error
-	dumpPath := c.cfg.Dump.ExecutionPath
-	if len(dumpPath) == 0 {
-		// ignore mysqldump, use binlog only
-		return nil
-	}
-
-	if c.dumper, err = dump.NewDumper(dumpPath,
-		c.cfg.Addr, c.cfg.User, c.cfg.Password); err != nil {
-		return errors.Trace(err)
-	}
-
-	if c.dumper == nil {
-		//no mysqldump, use binlog only
-		return nil
-	}
-
-	dbs := c.cfg.Dump.Databases
-	tables := c.cfg.Dump.Tables
-	tableDB := c.cfg.Dump.TableDB
-
-	if len(tables) == 0 {
-		c.dumper.AddDatabases(dbs...)
-	} else {
-		c.dumper.AddTables(tableDB, tables...)
-	}
-
-	charset := c.cfg.Charset
-	c.dumper.SetCharset(charset)
-
-	c.dumper.SetWhere(c.cfg.Dump.Where)
-	c.dumper.SkipMasterData(c.cfg.Dump.SkipMasterData)
-	c.dumper.SetMaxAllowedPacket(c.cfg.Dump.MaxAllowedPacketMB)
-	c.dumper.SetProtocol(c.cfg.Dump.Protocol)
-	c.dumper.SetExtraOptions(c.cfg.Dump.ExtraOptions)
-	// Use hex blob for mysqldump
-	c.dumper.SetHexBlob(true)
-
-	for _, ignoreTable := range c.cfg.Dump.IgnoreTables {
-		if seps := strings.Split(ignoreTable, ","); len(seps) == 2 {
-			c.dumper.AddIgnoreTables(seps[0], seps[1])
-		}
-	}
-
-	if c.cfg.Dump.DiscardErr {
-		c.dumper.SetErrOut(ioutil.Discard)
-	} else {
-		c.dumper.SetErrOut(os.Stderr)
-	}
-
-	return nil
-}
-
 func (c *Canal) GetDelay() uint32 {
 	return atomic.LoadUint32(c.delay)
 }
@@ -198,34 +126,10 @@ func (c *Canal) StartFromGTID(set mysql.GTIDSet) error {
 	return c.Run()
 }
 
-// Dump all data from MySQL master `mysqldump`, ignore sync binlog.
-func (c *Canal) Dump() error {
-	if c.dumped {
-		return errors.New("the method Dump can't be called twice")
-	}
-	c.dumped = true
-	defer close(c.dumpDoneCh)
-	return c.dump()
-}
-
 func (c *Canal) run() error {
 	defer func() {
 		c.cancel()
 	}()
-
-	c.master.UpdateTimestamp(uint32(time.Now().Unix()))
-
-	if !c.dumped {
-		c.dumped = true
-
-		err := c.tryDump()
-		close(c.dumpDoneCh)
-
-		if err != nil {
-			log.Errorf("canal dump mysql err: %v", err)
-			return errors.Trace(err)
-		}
-	}
 
 	if err := c.runSyncBinlog(); err != nil {
 		if errors.Cause(err) != context.Canceled {
@@ -250,10 +154,6 @@ func (c *Canal) Close() {
 	c.connLock.Unlock()
 
 	c.eventHandler.OnPosSynced(c.master.Position(), c.master.GTIDSet(), true)
-}
-
-func (c *Canal) WaitDumpDone() <-chan struct{} {
-	return c.dumpDoneCh
 }
 
 func (c *Canal) Ctx() context.Context {
@@ -312,15 +212,6 @@ func (c *Canal) GetTable(db string, table string) (*schema.Table, error) {
 		return t, nil
 	}
 
-	if c.cfg.DiscardNoMetaRowEvent {
-		c.tableLock.RLock()
-		lastTime, ok := c.errorTablesGetTime[key]
-		c.tableLock.RUnlock()
-		if ok && time.Now().Sub(lastTime) < UnknownTableRetryPeriod {
-			return nil, schema.ErrMissingTableMeta
-		}
-	}
-
 	t, err := schema.NewTable(c, db, table)
 	if err != nil {
 		// check table not exists
@@ -347,24 +238,12 @@ func (c *Canal) GetTable(db string, table string) (*schema.Table, error) {
 			c.tableLock.Unlock()
 			return ta, nil
 		}
-		// if DiscardNoMetaRowEvent is true, we just log this error
-		if c.cfg.DiscardNoMetaRowEvent {
-			c.tableLock.Lock()
-			c.errorTablesGetTime[key] = time.Now()
-			c.tableLock.Unlock()
-			// log error and return ErrMissingTableMeta
-			log.Errorf("canal get table meta err: %v", errors.Trace(err))
-			return nil, schema.ErrMissingTableMeta
-		}
+
 		return nil, err
 	}
 
 	c.tableLock.Lock()
 	c.tables[key] = t
-	if c.cfg.DiscardNoMetaRowEvent {
-		// if get table info success, delete this key from errorTablesGetTime
-		delete(c.errorTablesGetTime, key)
-	}
 	c.tableLock.Unlock()
 
 	return t, nil
@@ -375,9 +254,6 @@ func (c *Canal) ClearTableCache(db []byte, table []byte) {
 	key := fmt.Sprintf("%s.%s", db, table)
 	c.tableLock.Lock()
 	delete(c.tables, key)
-	if c.cfg.DiscardNoMetaRowEvent {
-		delete(c.errorTablesGetTime, key)
-	}
 	c.tableLock.Unlock()
 }
 
@@ -420,7 +296,6 @@ func (c *Canal) prepareSyncer() error {
 		Charset:                 c.cfg.Charset,
 		HeartbeatPeriod:         c.cfg.HeartbeatPeriod,
 		ReadTimeout:             c.cfg.ReadTimeout,
-		UseDecimal:              c.cfg.UseDecimal,
 		ParseTime:               c.cfg.ParseTime,
 		SemiSyncEnabled:         c.cfg.SemiSyncEnabled,
 		MaxReconnectAttempts:    c.cfg.MaxReconnectAttempts,
@@ -481,16 +356,4 @@ func (c *Canal) Execute(cmd string, args ...interface{}) (rr *mysql.Result, err 
 		}
 	}
 	return
-}
-
-func (c *Canal) SyncedPosition() mysql.Position {
-	return c.master.Position()
-}
-
-func (c *Canal) SyncedTimestamp() uint32 {
-	return c.master.timestamp
-}
-
-func (c *Canal) SyncedGTIDSet() mysql.GTIDSet {
-	return c.master.GTIDSet()
 }

@@ -35,7 +35,6 @@ type BinlogParser struct {
 	// used to start/stop processing
 	stopProcessing uint32
 
-	useDecimal          bool
 	ignoreJSONDecodeErr bool
 	verifyChecksum      bool
 }
@@ -189,10 +188,6 @@ func (p *BinlogParser) SetParseTime(parseTime bool) {
 
 func (p *BinlogParser) SetTimestampStringLocation(timestampStringLocation *time.Location) {
 	p.timestampStringLocation = timestampStringLocation
-}
-
-func (p *BinlogParser) SetUseDecimal(useDecimal bool) {
-	p.useDecimal = useDecimal
 }
 
 func (p *BinlogParser) SetIgnoreJSONDecodeError(ignoreJSONDecodeErr bool) {
@@ -370,7 +365,6 @@ func (p *BinlogParser) newRowsEvent(h *EventHeader) *RowsEvent {
 	e.tables = p.tables
 	e.parseTime = p.parseTime
 	e.timestampStringLocation = p.timestampStringLocation
-	e.useDecimal = p.useDecimal
 	e.ignoreJSONDecodeErr = p.ignoreJSONDecodeErr
 
 	switch h.EventType {

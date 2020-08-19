@@ -5,6 +5,7 @@ go 1.13
 require (
 	github.com/BurntSushi/toml v0.3.1
 	github.com/golang/protobuf v1.4.2 // indirect
+	github.com/pingcap/check v0.0.0-20200212061837-5e12011dc712
 	github.com/pingcap/errors v0.11.4
 	github.com/pingcap/parser v3.1.2+incompatible
 	github.com/pingcap/tipb v0.0.0-20200618092958-4fad48b4c8c3 // indirect

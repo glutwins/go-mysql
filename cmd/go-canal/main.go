@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
@@ -42,35 +41,15 @@ func main() {
 	cfg.User = *user
 	cfg.Password = *password
 	cfg.Flavor = *flavor
-	cfg.UseDecimal = true
 
 	cfg.ReadTimeout = *readTimeout
 	cfg.HeartbeatPeriod = *heartbeatPeriod
 	cfg.ServerID = uint32(*serverID)
-	cfg.Dump.ExecutionPath = *mysqldump
-	cfg.Dump.DiscardErr = false
 
 	c, err := canal.NewCanal(cfg)
 	if err != nil {
 		fmt.Printf("create canal err %v", err)
 		os.Exit(1)
-	}
-
-	if len(*ignoreTables) > 0 {
-		subs := strings.Split(*ignoreTables, ",")
-		for _, sub := range subs {
-			if seps := strings.Split(sub, "."); len(seps) == 2 {
-				c.AddDumpIgnoreTables(seps[0], seps[1])
-			}
-		}
-	}
-
-	if len(*tables) > 0 && len(*tableDB) > 0 {
-		subs := strings.Split(*tables, ",")
-		c.AddDumpTables(*tableDB, subs...)
-	} else if len(*dbs) > 0 {
-		subs := strings.Split(*dbs, ",")
-		c.AddDumpDatabases(subs...)
 	}
 
 	c.SetEventHandler(&handler{})

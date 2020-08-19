@@ -19,20 +19,13 @@ func (c *Canal) startSyncer() (*replication.BinlogStreamer, error) {
 	if gset == nil || gset.String() == "" {
 		pos := c.master.Position()
 		s, err := c.syncer.StartSync(pos)
-		if err != nil {
-			return nil, errors.Errorf("start sync replication at binlog %v error %v", pos, err)
-		}
-		log.Infof("start sync binlog at binlog file %v", pos)
-		return s, nil
-	} else {
-		gsetClone := gset.Clone()
-		s, err := c.syncer.StartSyncGTID(gset)
-		if err != nil {
-			return nil, errors.Errorf("start sync replication at GTID set %v error %v", gset, err)
-		}
-		log.Infof("start sync binlog at GTID set %v", gsetClone)
-		return s, nil
+		log.Infof("start sync binlog at binlog file %v(%v)", pos, err)
+		return s, err
 	}
+	gsetClone := gset.Clone()
+	s, err := c.syncer.StartSyncGTID(gset)
+	log.Infof("start sync binlog at GTID set %v (%v)", gsetClone, err)
+	return s, err
 }
 
 func (c *Canal) runSyncBinlog() error {
@@ -173,7 +166,6 @@ func (c *Canal) runSyncBinlog() error {
 
 		if savePos {
 			c.master.Update(pos)
-			c.master.UpdateTimestamp(ev.Header.Timestamp)
 			fakeRotateLogName = ""
 
 			if err := c.eventHandler.OnPosSynced(pos, c.master.GTIDSet(), force); err != nil {
@@ -181,8 +173,6 @@ func (c *Canal) runSyncBinlog() error {
 			}
 		}
 	}
-
-	return nil
 }
 
 type node struct {
@@ -273,35 +263,6 @@ func (c *Canal) handleRowsEvent(e *replication.BinlogEvent) error {
 	return c.eventHandler.OnRow(events)
 }
 
-func (c *Canal) FlushBinlog() error {
-	_, err := c.Execute("FLUSH BINARY LOGS")
-	return errors.Trace(err)
-}
-
-func (c *Canal) WaitUntilPos(pos mysql.Position, timeout time.Duration) error {
-	timer := time.NewTimer(timeout)
-	for {
-		select {
-		case <-timer.C:
-			return errors.Errorf("wait position %v too long > %s", pos, timeout)
-		default:
-			err := c.FlushBinlog()
-			if err != nil {
-				return errors.Trace(err)
-			}
-			curPos := c.master.Position()
-			if curPos.Compare(pos) >= 0 {
-				return nil
-			} else {
-				log.Debugf("master pos is %v, wait catching %v", curPos, pos)
-				time.Sleep(100 * time.Millisecond)
-			}
-		}
-	}
-
-	return nil
-}
-
 func (c *Canal) GetMasterPos() (mysql.Position, error) {
 	rr, err := c.Execute("SHOW MASTER STATUS")
 	if err != nil {
@@ -335,13 +296,4 @@ func (c *Canal) GetMasterGTIDSet() (mysql.GTIDSet, error) {
 		return nil, errors.Trace(err)
 	}
 	return gset, nil
-}
-
-func (c *Canal) CatchMasterPos(timeout time.Duration) error {
-	pos, err := c.GetMasterPos()
-	if err != nil {
-		return errors.Trace(err)
-	}
-
-	return c.WaitUntilPos(pos, timeout)
 }

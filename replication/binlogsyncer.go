@@ -71,9 +71,6 @@ type BinlogSyncerConfig struct {
 	// strings obtained from MySQL.
 	TimestampStringLocation *time.Location
 
-	// Use decimal.Decimal structure for decimals.
-	UseDecimal bool
-
 	// RecvBufferSize sets the size in bytes of the operating system's receive buffer associated with the connection.
 	RecvBufferSize int
 
@@ -156,7 +153,6 @@ func NewBinlogSyncer(cfg BinlogSyncerConfig) *BinlogSyncer {
 	b.parser.SetRawMode(b.cfg.RawModeEnabled)
 	b.parser.SetParseTime(b.cfg.ParseTime)
 	b.parser.SetTimestampStringLocation(b.cfg.TimestampStringLocation)
-	b.parser.SetUseDecimal(b.cfg.UseDecimal)
 	b.parser.SetVerifyChecksum(b.cfg.VerifyChecksum)
 	b.running = false
 	b.ctx, b.cancel = context.WithCancel(context.Background())

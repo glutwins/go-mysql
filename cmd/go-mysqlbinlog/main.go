@@ -42,7 +42,6 @@ func main() {
 		Password:        *password,
 		RawModeEnabled:  *rawMode,
 		SemiSyncEnabled: *semiSync,
-		UseDecimal:      true,
 	}
 
 	b := replication.NewBinlogSyncer(cfg)

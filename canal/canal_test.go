@@ -32,10 +32,6 @@ func (s *canalTestSuite) SetUpSuite(c *C) {
 	cfg.User = "root"
 	cfg.HeartbeatPeriod = 200 * time.Millisecond
 	cfg.ReadTimeout = 300 * time.Millisecond
-	cfg.Dump.ExecutionPath = "mysqldump"
-	cfg.Dump.TableDB = "test"
-	cfg.Dump.Tables = []string{"canal_test"}
-	cfg.Dump.Where = "id>0"
 
 	// include & exclude config
 	cfg.IncludeTableRegex = make([]string, 1)
@@ -111,20 +107,6 @@ func (h *testEventHandler) String() string {
 
 func (h *testEventHandler) OnPosSynced(p mysql.Position, set mysql.GTIDSet, f bool) error {
 	return nil
-}
-
-func (s *canalTestSuite) TestCanal(c *C) {
-	<-s.c.WaitDumpDone()
-
-	for i := 1; i < 10; i++ {
-		s.execute(c, "INSERT INTO test.canal_test (name) VALUES (?)", fmt.Sprintf("%d", i))
-	}
-	s.execute(c, "INSERT INTO test.canal_test (mi,umi) VALUES (?,?), (?,?), (?,?)", 0, 0, -1, 16777215, 1, 1)
-	s.execute(c, "ALTER TABLE test.canal_test ADD `age` INT(5) NOT NULL AFTER `name`")
-	s.execute(c, "INSERT INTO test.canal_test (name,age) VALUES (?,?)", "d", "18")
-
-	err := s.c.CatchMasterPos(10 * time.Second)
-	c.Assert(err, IsNil)
 }
 
 func (s *canalTestSuite) TestCanalFilter(c *C) {
